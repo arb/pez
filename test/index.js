@@ -733,8 +733,8 @@ describe('Dispenser', function () {
 
     it('parses an uploaded png file', function (done) {
 
-        Http.createServer(function (req, res) {
-debugger
+        var server = Http.createServer(function (req, res) {
+
             var payload = '';
 
             req.on('data', function (chunk) {
@@ -743,14 +743,15 @@ debugger
             });
 
             req.on('end', function () {
-debugger;
+
                 // Pull out the boundary value
+                payload = payload.toString();
                 var boundary = payload.match(/-(\d+)/);
                 payload = payload.replace(/-{2,}/g, '--');
-                Fs.writeFileSync('./test/fixtures/tmp.txt', payload)
 
-                simulate(payload, boundary[1], function (err, result) {
+                simulate(payload, boundary[1], req.headers['content-type'], function (err, result) {
 
+                    expect(err).to.not.exist;
                     expect(result).to.deep.equal({
                         sticker: {
                             filename: 'image.png',
@@ -762,23 +763,31 @@ debugger;
                             }
                         }
                     });
-                    done();
+
+                    res.writeHead(200);
+                    res.end();
                 });
             });
-        }).listen(1338, '127.0.0.1');
+        }).listen(0);
 
-        var form = new FormData();
-        form.append('sticker', Fs.createReadStream('./test/fixtures/image.png'), {
-            contentType: 'image/png',
-            filename: 'image.png'
+        server.once('listening', function () {
+
+            var form = new FormData();
+            form.append('sticker', Fs.createReadStream('./test/fixtures/image.png'), {
+                contentType: 'image/png',
+                filename: 'image.png'
+            });
+
+            var headers = form.getHeaders();
+
+            Wreck.request('POST','http://127.0.0.1:' + server.address().port, {
+                payload: form,
+                headers: headers
+            }, function (err, res, payload) {
+
+                done();
+            });
         });
-debugger
-        Wreck.request('POST','http://127.0.0.1:1338', {
-            payload: form,
-            headers: {
-                'content-transfer-encoding': 'base64'
-            }
-        }, function (err, res, payload) {});
     });
 });
 
@@ -916,6 +925,10 @@ Hoek.inherits(internals.Payload, Stream.Readable);
 internals.Payload.prototype._read = function (size) {
 
     var chunk = this._data[this._position++];
+    if (chunk && !Buffer.isBuffer(chunk)) {
+        chunk = new Buffer(chunk);
+    }
+
     if (chunk) {
         this.push(chunk);
     }
